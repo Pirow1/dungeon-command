@@ -40,6 +40,27 @@ export interface Unit {
   alive: boolean
   isStructure?: boolean // the shrine: cannot move/act, but can be attacked
   personality?: string // one-line, used in LLM prompts
+  // Stats. Attack lives in `attack.dmgMin/dmgMax` and reach in `move`; those are
+  // the truth and chest rewards mutate them directly. `defence` is flat damage
+  // reduction. `boosts` is a display-only tally of chests claimed, per stat.
+  defence?: number
+  boosts?: StatBoosts
+}
+
+export type ChestStat = 'attack' | 'defence' | 'move'
+
+export interface StatBoosts {
+  attack: number
+  defence: number
+  move: number
+}
+
+// Loot: one per wave, dropped on a random floor tile. Deliberately NOT a Unit —
+// as a unit it would leak into nearest-enemy clamps, the horde roster and the
+// end conditions. A chest is a tile you can stand on, nothing more.
+export interface Chest {
+  id: string
+  pos: Vec
 }
 
 export type ActionType = 'move' | 'move_attack' | 'attack' | 'heal' | 'defend' | 'wait'
@@ -52,6 +73,9 @@ export interface Action {
   toLandmark?: string
   targetId?: string
   radio?: string
+  // Out-of-character justification for the dev log ("has line of sight on the
+  // shrine"). Never spoken — `radio` is the in-character line.
+  reason?: string
 }
 
 export type TileKind = 'floor' | 'wall' | 'door' | 'shrine'
@@ -86,6 +110,7 @@ export interface GameState {
   turnsSinceWave: number
   rng: number // mulberry32 state — seeded, advances deterministically
   units: Unit[]
+  chests: Chest[] // unopened loot on the floor
   outcome: Outcome
   stats: GameStats
 }
@@ -101,6 +126,10 @@ export type GameEvent =
   | { type: 'chatter'; unitId: string; name: string; text: string; kind: 'party' | 'monster' }
   | { type: 'wave_spawned'; wave: number; unitIds: string[] }
   | { type: 'shrine_damaged'; amount: number; hpAfter: number }
+  | { type: 'chest_spawned'; chestId: string; pos: Vec }
+  // `pos` travels with the event: the chest is already off the state by the
+  // time the renderer plays this back.
+  | { type: 'chest_opened'; chestId: string; unitId: string; stat: ChestStat; pos: Vec }
   | { type: 'game_over'; outcome: Outcome }
 
 export const SHRINE_ID = 'shrine'

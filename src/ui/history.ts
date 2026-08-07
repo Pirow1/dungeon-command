@@ -9,7 +9,9 @@ import { beatHtml, beatText } from './beat'
 import { portraitFor } from './hud'
 import { sfx } from './sfx'
 
-export type LogKind = 'order' | 'party' | 'monster' | 'narrator' | 'beat' | 'system'
+// 'debug' = a unit's tactical reasoning. Always recorded, only rendered under
+// the Mind filter, which itself only exists in debug mode.
+export type LogKind = 'order' | 'party' | 'monster' | 'narrator' | 'beat' | 'system' | 'debug'
 
 export interface LogEntry {
   kind: LogKind
@@ -64,7 +66,8 @@ function append(entry: LogEntry): void {
   body.appendChild(row)
   if (pinned || !open) body.scrollTop = body.scrollHeight
 
-  if (!open) {
+  // Invisible entries must not badge the button.
+  if (!open && entry.kind !== 'debug') {
     unread++
     const badge = el('log-badge')
     badge.textContent = unread > 99 ? '99+' : String(unread)

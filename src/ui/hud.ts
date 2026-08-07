@@ -36,6 +36,7 @@ function buildCards(): void {
         <div class="nm"><span>${h.name}</span><span class="cls">${CLS_LABEL[h.cls] ?? h.cls}</span></div>
         <div class="bar hp"><i id="hp-${h.id}" style="width:100%"></i></div>
         <div class="nm"><span class="last" id="last-${h.id}">Ready.</span><span class="hpnum" id="hpnum-${h.id}">${h.maxHp}/${h.maxHp}</span></div>
+        <div class="statline" id="stats-${h.id}"></div>
       </div>`
     wrap.appendChild(card)
   }
@@ -64,6 +65,12 @@ export function updateHud(state: GameState): void {
     document.getElementById(`hpnum-${h.id}`)!.textContent = u.alive ? `${u.hp}/${u.maxHp}` : 'fallen'
     const last = document.getElementById(`last-${h.id}`)!
     last.textContent = u.alive ? (lastAction.get(h.id) ?? 'Ready.') : 'Has fallen…'
+    // Base values are the truth; `boosts` only decides which numbers glow gold.
+    const b = u.boosts ?? { attack: 0, defence: 0, move: 0 }
+    document.getElementById(`stats-${h.id}`)!.innerHTML =
+      `<span class="${b.attack ? 'up' : ''}">ATK <b>${u.attack.dmgMin}-${u.attack.dmgMax}</b></span>` +
+      `<span class="${b.defence ? 'up' : ''}">DEF <b>${u.defence ?? 0}</b></span>` +
+      `<span class="${b.move ? 'up' : ''}">MOV <b>${u.move}</b></span>`
   }
   updateHorde(state)
 }
@@ -155,6 +162,11 @@ export function pulseTarget(unitId: string, hpAfter: number, maxHp: number, heal
       document.getElementById(`hpnum-${unitId}`)!.textContent = `${Math.max(0, hpAfter)}/${maxHp}`
     }
   }
+}
+
+// A chest just paid out: draw the eye to the statline that changed.
+export function flashStat(unitId: string): void {
+  flash(document.getElementById(`stats-${unitId}`), 'looted')
 }
 
 export function markSlain(unitId: string): void {

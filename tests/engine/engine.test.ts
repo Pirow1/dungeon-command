@@ -5,8 +5,8 @@ import { reachable, pathTo, distanceField, bestTileToward } from '../../src/engi
 import { hasLOS } from '../../src/engine/los'
 import { summarize } from '../../src/engine/summary'
 import { fallbackMonsterActions, fallbackPartyActions } from '../../src/ai/fallback'
-import { keyOf, livingHeroes, livingMonsters, unitById } from '../../src/engine/types'
-import type { Action } from '../../src/engine/types'
+import { chebyshev, keyOf, livingHeroes, livingMonsters, unitById } from '../../src/engine/types'
+import type { Action, GameState, Vec } from '../../src/engine/types'
 
 describe('map', () => {
   it('parses level1 with landmarks and hero starts', () => {
@@ -136,7 +136,17 @@ describe('full game simulation', () => {
           resolveMonsterTurn(LEVEL1, state, fallbackMonsterActions(state))
         }
       }
-      return JSON.stringify({ o: state.outcome, t: state.turn, s: state.stats })
+      // Chest placement and stat rewards are seeded too — fold them into the
+      // fingerprint so a stray Math.random in the loot path fails loudly.
+      return JSON.stringify({
+        o: state.outcome,
+        t: state.turn,
+        s: state.stats,
+        c: state.chests.map((c) => [c.id, c.pos.x, c.pos.y]),
+        h: state.units
+          .filter((u) => u.side === 'party' && !u.isStructure)
+          .map((u) => [u.id, u.move, u.attack.dmgMin, u.defence ?? 0]),
+      })
     }
     expect(run(7)).toBe(run(7))
   })
@@ -149,6 +159,9 @@ describe('summary', () => {
     expect(s.party.length).toBe(4)
     expect(s.monsters.length).toBeGreaterThan(0)
     expect(s.landmarks).toContain('north_door')
+    // Chests are offered to the LLM the same way landmarks are.
+    expect(s.chests.length).toBe(1)
+    expect(s.chests[0]).toContain('chest1')
     // Compactness guard: the serialized summary must stay prompt-friendly.
     expect(JSON.stringify(s).length).toBeLessThan(4000)
   })
@@ -159,5 +172,155 @@ describe('waves', () => {
     const { state } = initGame(LEVEL1)
     expect(state.wave).toBe(1)
     expect(livingMonsters(state).length).toBe(3)
+  })
+})
+
+describe('loot chests', () => {
+  // Snapshot of everything a chest can change, for "only the opener gained".
+  const statsOf = (state: GameState) =>
+    state.units
+      .filter((u) => u.side === 'party' && !u.isStructure)
+      .map((u) => [u.id, u.attack.dmgMin, u.attack.dmgMax, u.defence ?? 0, u.move].join(':'))
+
+  // A floor tile the hero can reach in one move, clear of units and chests.
+  const freeTileNear = (state: GameState, from: Vec, dist = 1): Vec => {
+    for (let dx = -dist; dx <= dist; dx++) {
+      for (let dy = -dist; dy <= dist; dy++) {
+        const p = { x: from.x + dx, y: from.y + dy }
+        if (dx === 0 && dy === 0) continue
+        if (LEVEL1.tiles[p.y]?.[p.x] !== 'floor') continue
+        if (state.units.some((u) => u.alive && u.pos.x === p.x && u.pos.y === p.y)) continue
+        if (state.chests.some((c) => c.pos.x === p.x && c.pos.y === p.y)) continue
+        return p
+      }
+    }
+    throw new Error('no free tile')
+  }
+
+  it('drops exactly one chest per wave on a legal, unreserved tile', () => {
+    for (let seed = 1; seed <= 20; seed++) {
+      const { state } = initGame(LEVEL1, seed)
+      expect(state.chests.length).toBe(1)
+      const c = state.chests[0]
+      expect(c.id).toBe('chest1')
+      expect(LEVEL1.tiles[c.pos.y][c.pos.x]).toBe('floor')
+      // Never under a unit, and clear of doors and landmarks — a chest sitting on
+      // a landmark reads as "at east_door" and the LLM routes to the door.
+      expect(state.units.some((u) => u.alive && keyOf(u.pos) === keyOf(c.pos))).toBe(false)
+      for (const l of LEVEL1.landmarks) expect(chebyshev(c.pos, l.pos)).toBeGreaterThan(1)
+      for (const s of Object.values(LEVEL1.spawns).flat()) expect(chebyshev(c.pos, s)).toBeGreaterThan(2)
+      // …so the summary always says "N tiles from X", never "at X".
+      expect(summarize(LEVEL1, state).chests[0]).toContain('tiles from')
+    }
+  })
+
+  it('grants exactly one +1 to the hero who ends its move on the chest', () => {
+    const { state } = initGame(LEVEL1, 3)
+    const brannor = unitById(state, 'brannor')!
+    const chest = state.chests[0]
+    // Stand next to the chest so a single move lands on it.
+    brannor.pos = freeTileNear(state, chest.pos)
+    const before = statsOf(state)
+
+    const events = resolvePartyTurn(LEVEL1, state, [{ unitId: 'brannor', type: 'move', to: chest.pos }])
+
+    const opened = events.filter((e) => e.type === 'chest_opened')
+    expect(opened.length).toBe(1)
+    expect(opened[0]).toMatchObject({ unitId: 'brannor', chestId: chest.id })
+    expect(state.chests.find((c) => c.id === chest.id)).toBeUndefined()
+
+    const after = statsOf(state)
+    const changed = after.filter((row, i) => row !== before[i])
+    expect(changed.length).toBe(1)
+    expect(changed[0].startsWith('brannor')).toBe(true)
+
+    const b = unitById(state, 'brannor')!
+    const boosts = b.boosts!
+    expect(boosts.attack + boosts.defence + boosts.move).toBe(1)
+    if (boosts.attack) expect(b.attack.dmgMin).toBe(5) // 4-6 -> 5-7
+    if (boosts.defence) expect(b.defence).toBe(1)
+    if (boosts.move) expect(b.move).toBe(4) // 3 -> 4
+  })
+
+  it('is claimed by ending on it, never by walking over it', () => {
+    const { state } = initGame(LEVEL1, 5)
+    const sylvia = unitById(state, 'sylvia')!
+    // The southern corridor (row 10) is open floor from x=5 to x=14: hero, chest
+    // one step on, destination beyond it.
+    const y = 10
+    for (const x of [5, 6, 7, 8]) expect(LEVEL1.tiles[y][x]).toBe('floor')
+    sylvia.pos = { x: 5, y }
+    state.chests = [{ id: 'chestX', pos: { x: 6, y } }]
+
+    const events = resolvePartyTurn(LEVEL1, state, [{ unitId: 'sylvia', type: 'move', to: { x: 8, y } }])
+
+    expect(unitById(state, 'sylvia')!.pos).toEqual({ x: 8, y })
+    expect(events.some((e) => e.type === 'chest_opened')).toBe(false)
+    expect(state.chests.length).toBe(1)
+  })
+
+  it('routes to a chest by id through toLandmark', () => {
+    const { state } = initGame(LEVEL1, 9)
+    const pip = unitById(state, 'pip')!
+    const chest = state.chests[0]
+    const from = { ...pip.pos }
+
+    // An unresolvable toLandmark clamps to "defend", so simply moving proves the
+    // chest id resolved to a destination.
+    resolvePartyTurn(LEVEL1, state, [{ unitId: 'pip', type: 'move', toLandmark: chest.id }])
+    expect(unitById(state, 'pip')!.pos).not.toEqual(from)
+
+    // Keep walking until it arrives; the last step claims the loot.
+    let guard = 0
+    while (state.chests.some((c) => c.id === chest.id) && guard++ < 12) {
+      resolvePartyTurn(LEVEL1, state, [{ unitId: 'pip', type: 'move', toLandmark: chest.id }])
+    }
+    expect(state.chests.some((c) => c.id === chest.id)).toBe(false)
+    const boosts = unitById(state, 'pip')!.boosts!
+    expect(boosts.attack + boosts.defence + boosts.move).toBe(1)
+  })
+
+  it('ignores monsters standing on it', () => {
+    const { state } = initGame(LEVEL1, 11)
+    const chest = state.chests[0]
+    const goblin = livingMonsters(state)[0]
+    goblin.pos = freeTileNear(state, chest.pos)
+
+    const events = resolveMonsterTurn(LEVEL1, state, [{ unitId: goblin.id, type: 'move', to: chest.pos }])
+    expect(events.some((e) => e.type === 'chest_opened')).toBe(false)
+    expect(state.chests.length).toBe(1)
+  })
+
+  it('does not carry stat gains into the next game', () => {
+    const first = initGame(LEVEL1, 3).state
+    const brannor = unitById(first, 'brannor')!
+    brannor.pos = { ...first.chests[0].pos }
+    resolvePartyTurn(LEVEL1, first, [{ unitId: 'brannor', type: 'wait' }])
+    expect(unitById(first, 'brannor')!.boosts!.attack + unitById(first, 'brannor')!.boosts!.defence + unitById(first, 'brannor')!.boosts!.move).toBe(1)
+
+    const second = initGame(LEVEL1, 3).state
+    const fresh = unitById(second, 'brannor')!
+    expect(fresh.boosts).toEqual({ attack: 0, defence: 0, move: 0 })
+    expect(fresh.defence).toBe(0)
+    expect(fresh.move).toBe(3)
+    expect([fresh.attack.dmgMin, fresh.attack.dmgMax]).toEqual([4, 6])
+  })
+})
+
+describe('defence', () => {
+  it('blunts incoming damage but never fully absorbs it', () => {
+    const { state } = initGame(LEVEL1, 21)
+    const target = unitById(state, 'brannor')!
+    target.defence = 99
+    const goblin = livingMonsters(state)[0]
+    goblin.pos = { x: target.pos.x + 1, y: target.pos.y }
+
+    // Every monster acts on its turn, so assert per-blow rather than on total HP.
+    const events = resolveMonsterTurn(LEVEL1, state, [
+      { unitId: goblin.id, type: 'attack', targetId: 'brannor' },
+    ])
+    const hits = events.filter((e) => e.type === 'damage' && e.targetId === 'brannor')
+    expect(hits.length).toBeGreaterThan(0)
+    for (const h of hits) expect(h.type === 'damage' && h.amount).toBe(1)
   })
 })

@@ -1,6 +1,7 @@
 import type { Action, GameEvent, GameState, MapDef, Unit } from './types'
 import { SHRINE_ID, livingHeroes, livingMonsters, unitById } from './types'
 import { resolveUnitAction } from './actions'
+import { checkChestPickup } from './chests'
 import { shouldSpawnWave, spawnWave, WAVES } from './waves'
 import { HEROES } from '../data/heroes'
 import { resetMonsterCounter } from '../data/monsters'
@@ -25,11 +26,16 @@ export function initGame(map: MapDef, seed = 1337): { state: GameState; events: 
     alive: true,
     isStructure: true,
   }
+  // Every mutable sub-object is rebuilt per game: chest rewards mutate attack,
+  // move and boosts in place, and a spread would otherwise carry those gains
+  // into the next run through the shared HEROES constant.
   const heroes: Unit[] = HEROES.map((h, i) => ({
     ...h,
     attack: { ...h.attack },
     heal: h.heal ? { ...h.heal } : undefined,
     pos: { ...map.heroStarts[i] },
+    defence: 0,
+    boosts: { attack: 0, defence: 0, move: 0 },
   }))
   const state: GameState = {
     turn: 1,
@@ -38,6 +44,7 @@ export function initGame(map: MapDef, seed = 1337): { state: GameState; events: 
     turnsSinceWave: 0,
     rng: seed | 0,
     units: [shrine, ...heroes],
+    chests: [],
     outcome: 'ongoing',
     stats: { damageDealt: {}, kills: {}, turns: 0 },
   }
@@ -70,6 +77,9 @@ export function resolvePartyTurn(map: MapDef, state: GameState, actions: Action[
     if (!u?.alive) continue
     const a = actions.find((x) => x.unitId === hero.id) ?? { unitId: hero.id, type: 'defend' as const }
     resolveUnitAction(map, state, a, events)
+    // Checked on the hero's final tile, so any action that repositions can claim
+    // loot — and walking over a chest on the way past cannot.
+    checkChestPickup(state, u, events)
     if (state.outcome !== 'ongoing') break
   }
   checkEnd(state, events)

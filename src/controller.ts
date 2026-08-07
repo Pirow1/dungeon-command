@@ -1,4 +1,4 @@
-import type { Action, GameEvent, GameState } from './engine/types'
+import type { Action, ChestStat, GameEvent, GameState } from './engine/types'
 import { livingHeroes, unitById } from './engine/types'
 import { LEVEL1 } from './data/level1'
 import { initGame, resolveMonsterTurn, resolvePartyTurn } from './engine/turn'
@@ -12,6 +12,12 @@ import * as history from './ui/history'
 import type { Beat } from './ui/beat'
 import { displayName, resetLabels } from './ui/labels'
 import { MONSTER_DEFS } from './data/monsters'
+
+const STAT_LABEL: Record<ChestStat, string> = {
+  attack: 'Attack',
+  defence: 'Defence',
+  move: 'Movement',
+}
 
 // Orchestrates the whole turn loop:
 //   order -> interpret (LLM) -> party resolve -> party animation
@@ -40,6 +46,13 @@ export class Controller {
     // Goblin", "Braced"); the flavour quote lives in the chatter log.
     scene.onAction = (unitId, text) => hud.noteAction(unitId, text)
     scene.onBeat = (b) => this.handleBeat(b)
+    scene.onChest = (unitId, stat) => {
+      const u = unitById(this.state, unitId)
+      if (!u) return
+      history.logLine('system', `${displayName(u)} opens a chest — ${STAT_LABEL[stat]} +1.`)
+      hud.noteAction(unitId, `Looted +1 ${STAT_LABEL[stat]}`)
+      hud.flashStat(unitId)
+    }
     scene.onWave = (wave) => {
       hud.showBanner(wave >= this.state.totalWaves ? 'THE FINAL WAVE' : `WAVE ${wave}`)
       hud.updateHud(this.state)
@@ -48,6 +61,17 @@ export class Controller {
       this.narrate(`Wave ${wave} of ${this.state.totalWaves} pours in.`)
     }
     scene.bindState(() => this.state)
+  }
+
+  // Why each unit did what it did. Always recorded; the Chronicle only shows
+  // the Mind filter in debug mode, so players never see the tactical plumbing.
+  private logReasons(actions: Action[]): void {
+    for (const a of actions) {
+      if (!a.reason) continue
+      const u = unitById(this.state, a.unitId)
+      if (!u?.alive) continue
+      history.logLine('debug', a.reason, displayName(u), u.cls)
+    }
   }
 
   // Every landed blow, at the frame it lands: written to the chatter feed and
@@ -122,6 +146,7 @@ export class Controller {
       }
 
       // 2. Resolve party turn (includes any new wave spawning at the end).
+      this.logReasons(partyActions)
       const partyEvents = resolvePartyTurn(LEVEL1, this.state, partyActions)
 
       // 3. Fire the monster brain NOW — it thinks while the heroes animate.
@@ -150,6 +175,7 @@ export class Controller {
         const m = unitById(this.state, t.unitId)
         if (m?.alive) chatter.monsterSays(displayName(m), m.cls, t.text)
       }
+      this.logReasons(monsterActions)
       const monsterEvents = resolveMonsterTurn(LEVEL1, this.state, monsterActions)
       await this.scene.playEvents(this.state, monsterEvents)
       hud.updateHud(this.state)
@@ -167,12 +193,16 @@ export class Controller {
     this.busy = true
     try {
       hud.setPhase('heroes')
+      history.setChapter(this.state.wave, this.state.turn)
+      this.logReasons(partyActions)
       const partyEvents = resolvePartyTurn(LEVEL1, this.state, partyActions)
       await this.scene.playEvents(this.state, partyEvents)
       hud.updateHud(this.state)
       if (this.checkGameOver()) return
       hud.setPhase('horde')
-      const monsterEvents = resolveMonsterTurn(LEVEL1, this.state, fallbackMonsterActions(this.state))
+      const monsterActions = fallbackMonsterActions(this.state)
+      this.logReasons(monsterActions)
+      const monsterEvents = resolveMonsterTurn(LEVEL1, this.state, monsterActions)
       await this.scene.playEvents(this.state, monsterEvents)
       hud.updateHud(this.state)
       if (this.checkGameOver()) return

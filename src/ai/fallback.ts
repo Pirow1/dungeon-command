@@ -26,10 +26,13 @@ export function fallbackPartyActions(state: GameState, withRadio = true): Action
           type: 'heal' as const,
           targetId: wounded.id,
           radio: withRadio ? cannedLine(h.id) : undefined,
+          reason: `heuristic: ${wounded.id} below 60% health`,
         }
       }
     }
-    if (!monsters.length) return { unitId: h.id, type: 'defend' as const }
+    if (!monsters.length) {
+      return { unitId: h.id, type: 'defend' as const, reason: 'heuristic: no monsters alive, bracing' }
+    }
     let nearest = monsters[0]
     for (const m of monsters) {
       if (chebyshev(h.pos, m.pos) < chebyshev(h.pos, nearest.pos)) nearest = m
@@ -39,6 +42,7 @@ export function fallbackPartyActions(state: GameState, withRadio = true): Action
       type: 'move_attack' as const,
       targetId: nearest.id,
       radio: withRadio ? cannedLine(h.id) : undefined,
+      reason: `heuristic: ${nearest.id} is the nearest monster`,
     }
   })
 }
@@ -49,9 +53,21 @@ export function fallbackMonsterActions(state: GameState): Action[] {
   return livingMonsters(state).map((m) => {
     // Orcs push the shrine; everyone else hunts the weakest reachable hero.
     if (m.cls === 'orc' && shrine?.alive) {
-      return { unitId: m.id, type: 'move_attack' as const, targetId: SHRINE_ID }
+      return {
+        unitId: m.id,
+        type: 'move_attack' as const,
+        targetId: SHRINE_ID,
+        reason: 'doctrine: orcs ignore heroes and push the shrine',
+      }
     }
-    if (!heroes.length) return { unitId: m.id, type: 'move_attack' as const, targetId: SHRINE_ID }
+    if (!heroes.length) {
+      return {
+        unitId: m.id,
+        type: 'move_attack' as const,
+        targetId: SHRINE_ID,
+        reason: 'heuristic: no heroes left, taking the shrine',
+      }
+    }
     let target = heroes[0]
     for (const h of heroes) {
       const better =
@@ -60,6 +76,11 @@ export function fallbackMonsterActions(state: GameState): Action[] {
           chebyshev(m.pos, h.pos) < chebyshev(m.pos, target.pos))
       if (better) target = h
     }
-    return { unitId: m.id, type: 'move_attack' as const, targetId: target.id }
+    return {
+      unitId: m.id,
+      type: 'move_attack' as const,
+      targetId: target.id,
+      reason: `heuristic: ${target.id} is the weakest hero in reach`,
+    }
   })
 }

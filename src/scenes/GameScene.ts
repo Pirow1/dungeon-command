@@ -1,5 +1,5 @@
 import Phaser from 'phaser'
-import type { GameEvent, GameState, Unit, Vec } from '../engine/types'
+import type { Chest, ChestStat, GameEvent, GameState, Unit, Vec } from '../engine/types'
 import { unitById } from '../engine/types'
 import { LEVEL1 } from '../data/level1'
 import { reachable } from '../engine/pathfind'
@@ -30,8 +30,15 @@ export interface BeatSignal {
 
 const px = (t: number) => t * CELL + CELL / 2
 
+const STAT_POP: Record<ChestStat, string> = {
+  attack: '+1 ATK',
+  defence: '+1 DEF',
+  move: '+1 MOV',
+}
+
 export class GameScene extends Phaser.Scene {
   private views = new Map<string, UnitView>()
+  private chestViews = new Map<string, Phaser.GameObjects.Container>()
   private rangeOverlay!: Phaser.GameObjects.Graphics
   private speed = 1
   private getState: (() => GameState) | null = null
@@ -39,6 +46,7 @@ export class GameScene extends Phaser.Scene {
   onWave: ((wave: number) => void) | null = null
   onAction: ((unitId: string, text: string) => void) | null = null
   onBeat: ((beat: BeatSignal) => void) | null = null
+  onChest: ((unitId: string, stat: ChestStat) => void) | null = null
 
   constructor() {
     super('game')
@@ -144,6 +152,40 @@ export class GameScene extends Phaser.Scene {
       if (!this.views.has(u.id)) this.createView(u)
     }
     this.refreshBars(state)
+    this.syncChests(state)
+  }
+
+  // Reconciles chest props against state. Chest ids restart at chest1 every new
+  // game, so a stale view is one whose id is gone OR whose tile no longer
+  // matches — matching on id alone would leave last game's chest on the floor.
+  private syncChests(state: GameState): void {
+    for (const [id, view] of this.chestViews) {
+      const chest = state.chests.find((c) => c.id === id)
+      if (!chest || view.x !== px(chest.pos.x) || view.y !== px(chest.pos.y)) {
+        view.destroy()
+        this.chestViews.delete(id)
+      }
+    }
+    for (const c of state.chests) {
+      if (!this.chestViews.has(c.id)) this.createChestView(c)
+    }
+  }
+
+  private createChestView(chest: Chest): void {
+    // The sheet's wooden props read like the wall torches at a glance, so loot
+    // is pushed gold and given a pulsing pool of light plus a slow bob — on this
+    // map, "the thing that shimmers" means treasure.
+    const sprite = this.add.image(0, -2, SHEET, FRAMES.chest).setScale(CELL / 16).setTint(0xffd982)
+    const glow = this.add.circle(0, 8, 24, 0xffc451, 0.22).setBlendMode(Phaser.BlendModes.ADD)
+    const spark = this.add.circle(0, -6, 7, 0xfff0c0, 0.5).setBlendMode(Phaser.BlendModes.ADD)
+    // Sits under the units (depth 3) so a hero standing on it is still readable.
+    const root = this.add.container(px(chest.pos.x), px(chest.pos.y), [glow, sprite, spark]).setDepth(2)
+    this.tweens.add({ targets: glow, alpha: { from: 0.45, to: 0.15 }, scale: { from: 1.1, to: 0.85 }, duration: 1100, yoyo: true, repeat: -1 })
+    this.tweens.add({ targets: spark, alpha: { from: 0.7, to: 0.1 }, scale: { from: 1, to: 0.4 }, duration: 900, yoyo: true, repeat: -1 })
+    this.tweens.add({ targets: sprite, y: { from: -4, to: 0 }, duration: 950, yoyo: true, repeat: -1, ease: 'sine.inout' })
+    this.chestViews.set(chest.id, root)
+    root.setScale(0)
+    this.tweens.add({ targets: root, scale: 1, duration: 240, ease: 'back.out' })
   }
 
   private createView(u: Unit): void {
@@ -280,6 +322,9 @@ export class GameScene extends Phaser.Scene {
         case 'defend':
           put(ev.unitId, 2, 'Braced')
           break
+        case 'chest_opened':
+          put(ev.unitId, 2, 'Looted a chest')
+          break
         case 'unit_moved':
           put(ev.unitId, 1, 'Advanced')
           break
@@ -314,6 +359,27 @@ export class GameScene extends Phaser.Scene {
         case 'chatter':
           this.onChatter?.(ev)
           break
+        case 'chest_spawned': {
+          if (!this.chestViews.has(ev.chestId)) this.createChestView({ id: ev.chestId, pos: ev.pos })
+          await this.wait(260)
+          break
+        }
+        case 'chest_opened': {
+          const view = this.chestViews.get(ev.chestId)
+          sfx('heal')
+          const x = view?.x ?? px(ev.pos.x)
+          const y = view?.y ?? px(ev.pos.y)
+          this.impact(x, y, 0xffd67a)
+          this.floatText(x, y - 26, STAT_POP[ev.stat], '#ffd67a', 20)
+          if (view) {
+            await this.tweenP({ targets: view, alpha: 0, scale: 0.5, duration: 260, ease: 'quad.in' })
+            view.destroy()
+            this.chestViews.delete(ev.chestId)
+          }
+          this.onChest?.(ev.unitId, ev.stat)
+          await this.wait(240)
+          break
+        }
         case 'wave_spawned': {
           this.onWave?.(ev.wave)
           sfx('door')

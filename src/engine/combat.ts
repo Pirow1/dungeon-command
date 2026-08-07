@@ -14,7 +14,16 @@ export function randInt(state: GameState, min: number, max: number): number {
   return min + Math.floor(nextFloat(state) * (max - min + 1))
 }
 
-export function rollDamage(state: GameState, dmgMin: number, dmgMax: number, targetDefending: boolean): number {
+// Roll, halve if the target braced, then subtract flat defence. A blow always
+// lands for at least 1 — armour blunts, it never makes a hero untouchable.
+export function rollDamage(
+  state: GameState,
+  dmgMin: number,
+  dmgMax: number,
+  targetDefending: boolean,
+  targetDefence = 0,
+): number {
   const raw = randInt(state, dmgMin, dmgMax)
-  return targetDefending ? Math.max(1, Math.ceil(raw / 2)) : raw
+  const guarded = targetDefending ? Math.ceil(raw / 2) : raw
+  return Math.max(1, guarded - targetDefence)
 }

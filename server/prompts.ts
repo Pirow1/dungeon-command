@@ -16,7 +16,9 @@ Rules:
 - Position orders: use move with toLandmark = a key from state.landmarks.
 - Heroes the order does not mention: choose a sensible supporting action (defend the shrine, shoot enemies in range).
 - Unclear or impossible orders: do something reasonable; the hero may voice confusion in their radio line.
-- radio: one in-character spoken line, max 12 words, true to the hero's personality. Never repeat the same line twice.`
+- Loot: state.chests lists unopened chests ("chest2 (loot) - 4 tiles from west_door"). A hero claims one by ENDING its move on it: type "move" with toLandmark = the CHEST ID ("chest2"), never the landmark it happens to lie near. It grants that hero a permanent +1 to attack, defence or movement. A chest id inside a hero's canReachThisTurn means it can claim it this turn. Send a hero for loot when the shrine is not under immediate threat.
+- radio: one in-character spoken line, max 12 words, true to the hero's personality. Never repeat the same line twice.
+- reason: a short OUT-of-character tactical note for the developer log, max 12 words, saying WHY ("closing on chest2, free upgrade", "line of sight on goblin3"). This is never spoken - the radio line is the speech.`
 
 export const MONSTER_SYSTEM = `You command the monster horde in a dungeon defense game. Choose one action per living monster in state.monsters.
 
@@ -33,6 +35,7 @@ Rules:
 - targetId: a hero id from state.party, or "shrine".
 - Every orc's targetId MUST be "shrine" and its type MUST be "move_attack" (never "wait", never a hero) — even when toShrine is large, move_attack "shrine" closes the distance. If any monster has canHitShrineNow true, it should attack the shrine.
 - Spread hero attacks intelligently; do not all chase the same hero unless finishing a kill.
+- reason: a short tactical note for the developer log, max 10 words, saying WHY this monster acts ("moving south, has line of sight on the shrine").
 - taunt: optionally pick ONE monster to snarl a short menacing line (max 10 words), else null.`
 
 export const NARRATOR_SYSTEM = `You are the ominous voice of a scrying orb narrating a dungeon defense. Given a battle moment, reply with ONE short sentence, MAXIMUM 13 WORDS, dark-fantasy tone.
@@ -56,7 +59,8 @@ export const ORDER_SCHEMA = {
         items: {
           type: 'object',
           additionalProperties: false,
-          required: ['unitId', 'type', 'targetId', 'toLandmark', 'radio'],
+          // strict mode: every property must also appear in `required`.
+          required: ['unitId', 'type', 'targetId', 'toLandmark', 'radio', 'reason'],
           properties: {
             unitId: { type: 'string', enum: ['brannor', 'sylvia', 'pip', 'mira'] },
             type: { type: 'string', enum: ['move', 'move_attack', 'attack', 'heal', 'defend', 'wait'] },
@@ -65,6 +69,7 @@ export const ORDER_SCHEMA = {
             targetId: { anyOf: [{ type: 'string' }, { type: 'null' }] },
             toLandmark: { anyOf: [{ type: 'string' }, { type: 'null' }] },
             radio: { type: 'string' },
+            reason: { type: 'string' },
           },
         },
       },
@@ -85,11 +90,12 @@ export const MONSTER_SCHEMA = {
         items: {
           type: 'object',
           additionalProperties: false,
-          required: ['unitId', 'type', 'targetId'],
+          required: ['unitId', 'type', 'targetId', 'reason'],
           properties: {
             unitId: { type: 'string' },
             type: { type: 'string', enum: ['move', 'move_attack', 'attack', 'defend', 'wait'] },
             targetId: { anyOf: [{ type: 'string' }, { type: 'null' }] },
+            reason: { type: 'string' },
           },
         },
       },

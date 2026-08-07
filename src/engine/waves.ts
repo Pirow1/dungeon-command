@@ -3,6 +3,7 @@ import { keyOf, livingMonsters } from './types'
 import { occupiedSet, isStandable } from './map'
 import { distanceField } from './pathfind'
 import { makeMonster } from '../data/monsters'
+import { spawnChestForWave } from './chests'
 
 export interface WaveSpawn {
   kind: string
@@ -104,4 +105,6 @@ export function spawnWave(map: MapDef, state: GameState, events: GameEvent[]): v
     ids.push(m.id)
   }
   events.push({ type: 'wave_spawned', wave: state.wave, unitIds: ids })
+  // After the monsters are placed, so loot never lands under an arriving wave.
+  spawnChestForWave(map, state, events)
 }

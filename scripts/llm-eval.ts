@@ -46,6 +46,7 @@ async function main() {
     console.log(`✓ ${ms}ms  "${order}"`)
     for (const a of data.actions) {
       console.log(`    ${a.unitId}: ${a.type}${a.targetId ? ' -> ' + a.targetId : ''}${a.toLandmark ? ' @ ' + a.toLandmark : ''}  "${a.radio ?? ''}"`)
+      if (a.reason) console.log(`        why: ${a.reason}`)
     }
     if (heroCount < 4) console.log(`    ⚠ only ${heroCount}/4 heroes ordered (engine clamps the rest)`)
     console.log(`    engine events: ${events.length}`)

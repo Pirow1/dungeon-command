@@ -7,10 +7,10 @@ import { expect, test } from '@playwright/test'
 
 const PARTY_FIXTURE = {
   actions: [
-    { unitId: 'brannor', type: 'move_attack', targetId: 'goblin1', toLandmark: null, radio: 'Aye! Wee beasties!' },
-    { unitId: 'sylvia', type: 'attack', targetId: 'goblin1', toLandmark: null, radio: 'Fine. Shooting.' },
-    { unitId: 'pip', type: 'attack', targetId: 'goblin2', toLandmark: null, radio: 'S-sorry! Firebolt!' },
-    { unitId: 'mira', type: 'defend', targetId: null, toLandmark: null, radio: 'The Light holds.' },
+    { unitId: 'brannor', type: 'move_attack', targetId: 'goblin1', toLandmark: null, radio: 'Aye! Wee beasties!', reason: 'goblin1 is the closest threat' },
+    { unitId: 'sylvia', type: 'attack', targetId: 'goblin1', toLandmark: null, radio: 'Fine. Shooting.', reason: 'clear line of sight on goblin1' },
+    { unitId: 'pip', type: 'attack', targetId: 'goblin2', toLandmark: null, radio: 'S-sorry! Firebolt!', reason: 'firebolt one-shots a goblin' },
+    { unitId: 'mira', type: 'defend', targetId: null, toLandmark: null, radio: 'The Light holds.', reason: 'holding the shrine, nobody wounded yet' },
   ],
 }
 
@@ -18,9 +18,9 @@ const PARTY_FIXTURE = {
 // by the time the horde acts, so the taunt comes from goblin3 (untouched).
 const MONSTER_FIXTURE = {
   actions: [
-    { unitId: 'goblin1', type: 'move_attack', targetId: 'brannor' },
-    { unitId: 'goblin2', type: 'move_attack', targetId: 'brannor' },
-    { unitId: 'goblin3', type: 'move_attack', targetId: 'shrine' },
+    { unitId: 'goblin1', type: 'move_attack', targetId: 'brannor', reason: 'swarm the dwarf holding the line' },
+    { unitId: 'goblin2', type: 'move_attack', targetId: 'brannor', reason: 'two on one finishes him faster' },
+    { unitId: 'goblin3', type: 'move_attack', targetId: 'shrine', reason: 'shrine is undefended from the west' },
   ],
   taunt: { unitId: 'goblin3', text: 'Your shrine burns tonight!' },
 }
@@ -74,6 +74,7 @@ test('a typed order runs a full turn: heroes act, horde answers, HUD updates', a
 test('the chronicle keeps the record after the chatter has faded', async ({ page }) => {
   await page.goto('/')
   await page.click('#start-btn')
+  await page.locator('#horde-list .horde-row').first().waitFor()
   await page.fill('#order-input', 'Everyone attack the nearest goblin')
   await page.click('#send-btn')
   await expect(page.locator('#phase-chip')).toHaveText('YOUR COMMAND', { timeout: 40000 })
@@ -93,6 +94,56 @@ test('the chronicle keeps the record after the chatter has faded', async ({ page
   await page.click('#log-filters button[data-filter="battle"]')
   await expect(page.locator('#log-body .e-order')).toBeHidden()
   await expect(page.locator('#log-body .e-beat').first()).toBeVisible()
+
+  // Reasoning is dev-only: recorded, but neither filter nor rows are offered.
+  await expect(page.locator('#log-filters button[data-filter="mind"]')).toBeHidden()
+  await expect(page.locator('#log-body .e-debug').first()).toBeHidden()
+})
+
+test('the Mind filter exposes why each unit acted, in debug mode only', async ({ page }) => {
+  await page.goto('/?debug=1')
+  await page.click('#start-btn')
+  await page.locator('#horde-list .horde-row').first().waitFor()
+  await page.fill('#order-input', 'Everyone attack the nearest goblin')
+  await page.click('#send-btn')
+  await expect(page.locator('#phase-chip')).toHaveText('YOUR COMMAND', { timeout: 40000 })
+
+  await page.click('#log-btn')
+  // Still hidden under All — the Mind filter is the only way in.
+  await expect(page.locator('#log-body .e-debug').first()).toBeHidden()
+
+  await page.click('#log-filters button[data-filter="mind"]')
+  await expect(page.locator('#log-body .e-debug').first()).toBeVisible()
+  await expect(page.locator('#log-body')).toContainText('goblin1 is the closest threat')
+  // Both sides reason, not just the party.
+  await expect(page.locator('#log-body')).toContainText('shrine is undefended from the west')
+  // …and the story rows step aside while Mind is active.
+  await expect(page.locator('#log-body .e-beat').first()).toBeHidden()
+})
+
+test('a hero who ends a move on a chest gains a stat', async ({ page }) => {
+  await page.goto('/?debug=1')
+  await page.click('#start-btn')
+  await page.locator('#horde-list .horde-row').first().waitFor()
+
+  // Stand Brannor on the wave-1 chest and take a turn. Walking him there would
+  // cost up to eight turns depending on where the chest rolled; the "you must
+  // END a move on it" rule is covered by the engine tests. What this test is
+  // for is the chain from the engine event through to the HUD.
+  const before = await page.locator('#stats-brannor').innerText()
+  await page.evaluate(() => {
+    const s = (window as any).__dc.state
+    const brannor = s.units.find((u: any) => u.id === 'brannor')
+    brannor.pos = { ...s.chests[0].pos }
+  })
+  await page.fill('#dbg-json', JSON.stringify([{ unitId: 'brannor', type: 'wait' }]))
+  await page.click('#dbg-inject')
+  await expect(page.locator('#phase-chip')).toHaveText('YOUR COMMAND', { timeout: 40000 })
+  expect(await page.evaluate(() => (window as any).__dc.state.chests.length)).toBe(0)
+
+  await expect(page.locator('#stats-brannor')).not.toHaveText(before)
+  await expect(page.locator('#stats-brannor .up')).toHaveCount(1)
+  await expect(page.locator('#log-body')).toContainText('opens a chest')
 })
 
 test('the game is fully playable with the LLM unavailable', async ({ page }) => {
@@ -100,6 +151,9 @@ test('the game is fully playable with the LLM unavailable', async ({ page }) => 
   await page.route('**/api/monster-turn', (r) => r.fulfill({ status: 502, json: { error: 'down' } }))
   await page.goto('/')
   await page.click('#start-btn')
+  // The start button primes the microphone before dealing the board; ordering
+  // before that lands drops the order.
+  await page.locator('#horde-list .horde-row').first().waitFor()
   await page.fill('#order-input', 'attack')
   await page.click('#send-btn')
 

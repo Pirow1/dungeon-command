@@ -33,6 +33,7 @@ export const FRAMES = {
   // fx / items
   shield: 102,
   bones: 89,
+  chest: 66, // wooden box prop with a transparent tile background (73 = smaller alt)
 } as const
 
 export const UNIT_FRAME: Record<string, number> = {

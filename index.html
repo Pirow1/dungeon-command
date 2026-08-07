@@ -103,6 +103,15 @@
     .log-entry.e-beat { font-size: 13px; gap: 5px; }
     #log-body.f-battle .e-party, #log-body.f-battle .e-monster, #log-body.f-battle .e-narrator, #log-body.f-battle .e-order { display: none; }
     #log-body.f-voices .e-beat, #log-body.f-voices .e-system { display: none; }
+    /* Reasoning is recorded on every turn but only ever shown under Mind. */
+    .log-entry.e-debug { display: none; }
+    #log-body.f-mind .e-party, #log-body.f-mind .e-monster, #log-body.f-mind .e-narrator,
+    #log-body.f-mind .e-order, #log-body.f-mind .e-beat, #log-body.f-mind .e-system { display: none; }
+    #log-body.f-mind .e-debug { display: flex; }
+    .e-debug .who { color: #7fb8e0; }
+    .e-debug .txt { color: #93a9c9; font-size: 12px; font-style: italic; }
+    #log-filters button[data-filter="mind"] { display: none; }
+    body.debug-mode #log-filters button[data-filter="mind"] { display: block; }
 
     /* wave banner */
     #banner { position: absolute; top: 42%; left: 0; right: 0; text-align: center; font-family: Cinzel, serif; font-size: 44px; font-weight: 900; letter-spacing: 4px; color: var(--gold); text-shadow: 0 2px 0 #000, 0 0 30px rgba(217,164,65,.55); opacity: 0; pointer-events: none; z-index: 6; }
@@ -132,6 +141,12 @@
     .hero-card .nm .cls { color: var(--ink); font-size: 12px; }
     .hero-card .hpnum { font-size: 12px; color: var(--ink); }
     .hero-card .last { font-size: 12px; color: var(--ink); font-style: italic; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .hero-card .statline { display: flex; gap: 9px; font-size: 10px; letter-spacing: .5px; color: #6b6378; margin-top: 2px; }
+    .hero-card .statline b { color: var(--ink); font-weight: 700; }
+    .hero-card .statline .up { color: var(--gold-dim); }
+    .hero-card .statline .up b { color: var(--gold); }
+    .statline.looted { animation: lootFlash .7s ease-out; }
+    @keyframes lootFlash { 0% { color: var(--gold); text-shadow: 0 0 10px rgba(217,164,65,.7); transform: translateX(3px); } 100% { text-shadow: none; transform: none; } }
 
     #horde-box { border: 1px solid rgba(224,85,69,.3); border-radius: 5px; padding: 6px 9px; background: rgba(224,85,69,.05); margin-top: 4px; }
     .horde-title { font-family: Cinzel, serif; font-size: 12px; letter-spacing: 2px; color: var(--danger); margin-bottom: 5px; }
@@ -228,6 +243,7 @@
             <button data-filter="all" class="on">All</button>
             <button data-filter="battle">Battle</button>
             <button data-filter="voices">Voices</button>
+            <button data-filter="mind">Mind</button>
           </div>
           <div id="log-body" class="f-all"></div>
         </div>

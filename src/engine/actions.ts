@@ -41,7 +41,13 @@ function inAttackRange(map: MapDef, attacker: Unit, target: Unit, from?: Vec): b
 }
 
 function applyDamage(state: GameState, attacker: Unit, target: Unit, events: GameEvent[]): void {
-  const dmg = rollDamage(state, attacker.attack.dmgMin, attacker.attack.dmgMax, target.defending)
+  const dmg = rollDamage(
+    state,
+    attacker.attack.dmgMin,
+    attacker.attack.dmgMax,
+    target.defending,
+    target.defence ?? 0,
+  )
   target.hp = Math.max(0, target.hp - dmg)
   state.stats.damageDealt[attacker.id] = (state.stats.damageDealt[attacker.id] ?? 0) + dmg
   if (target.id === SHRINE_ID) {
@@ -150,10 +156,15 @@ function resolveTargetAlly(state: GameState, unit: Unit, targetId?: string): Uni
   return wounded[0]
 }
 
-function resolveDest(map: MapDef, action: Action): Vec | undefined {
+// `toLandmark` doubles as the chest channel: chest ids are handed to the LLM in
+// the state summary exactly like landmark keys, so "go get chest2" needs no new
+// action shape.
+function resolveDest(map: MapDef, state: GameState, action: Action): Vec | undefined {
   if (action.toLandmark) {
     const p = landmarkPos(map, action.toLandmark)
     if (p) return p
+    const chest = state.chests.find((c) => c.id === action.toLandmark)
+    if (chest) return { ...chest.pos }
   }
   if (action.to && Number.isInteger(action.to.x) && Number.isInteger(action.to.y)) {
     return { x: action.to.x, y: action.to.y }
@@ -228,7 +239,7 @@ export function resolveUnitAction(
       return
     }
     case 'move': {
-      const destRaw = resolveDest(map, action)
+      const destRaw = resolveDest(map, state, action)
       if (!destRaw) {
         // "Move" with no destination -> hold ground defensively.
         unit.defending = true
@@ -243,7 +254,7 @@ export function resolveUnitAction(
       const target = resolveTargetEnemy(state, unit, action.targetId)
       if (!target) {
         // Nothing to fight: follow the positional part if any, else defend.
-        const destRaw = resolveDest(map, action)
+        const destRaw = resolveDest(map, state, action)
         if (destRaw) moveToward(map, state, unit, nudgeDest(map, state, destRaw, unit.id), events)
         else {
           unit.defending = true

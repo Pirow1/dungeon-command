@@ -8,6 +8,10 @@ export function initDebug(controller: Controller, scene: GameScene): void {
   if (!new URLSearchParams(location.search).has('debug')) return
   const panel = document.getElementById('debug')!
   panel.classList.add('on')
+  // The single gate for dev-only UI elsewhere — the Chronicle's Mind filter.
+  document.body.classList.add('debug-mode')
+  // Live state from the console (and from e2e): __dc.state.chests, __dc.state.units…
+  ;(window as unknown as { __dc: Controller }).__dc = controller
 
   const btns = document.getElementById('dbg-buttons')!
   const mk = (label: string, fn: () => void) => {

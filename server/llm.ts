@@ -55,6 +55,10 @@ const actionSchema = z.object({
   targetId: z.string().nullish(),
   toLandmark: z.string().nullish(),
   radio: z.string().nullish(),
+  // Tolerant on purpose: zod strips unknown keys, so `reason` has to be listed
+  // here or it never reaches the client — but a model that omits it must not
+  // dump the whole turn to the heuristic fallback.
+  reason: z.string().nullish(),
 })
 
 const ordersSchema = z.object({ actions: z.array(actionSchema) })
@@ -112,6 +116,7 @@ function mockOrders(state: SummaryLike) {
         targetId: ne,
         toLandmark: null,
         radio: MOCK_LINES[p.id] ?? 'For the Order!',
+        reason: ne ? `mock: nearest enemy is ${ne}` : 'mock: nothing in reach, bracing',
       }
     }),
   }
@@ -127,6 +132,7 @@ function mockMonsters(state: SummaryLike) {
         targetId: m.cls === 'orc' ? 'shrine' : nh,
         toLandmark: null,
         radio: null,
+        reason: m.cls === 'orc' ? 'mock: doctrine, orcs smash the shrine' : 'mock: hunting the nearest hero',
       }
     }),
     taunt: null,
@@ -159,7 +165,9 @@ export async function monsterTurn(state: unknown) {
       user: `Game state:\n${JSON.stringify(state)}`,
       schemaName: MONSTER_SCHEMA.name,
       schema: MONSTER_SCHEMA.schema as unknown as Record<string, unknown>,
-      maxTokens: 2048,
+      // Stacked waves can field 10+ monsters and each action now carries a
+      // reason; 2048 was close to the edge before that.
+      maxTokens: 3072,
     },
     monstersSchema,
   )
