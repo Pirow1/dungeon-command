@@ -163,16 +163,35 @@ test('the game is fully playable with the LLM unavailable', async ({ page }) => 
   await expect(page.locator('#turn-num')).toHaveText('2')
 })
 
-test('debug panel drives the game to a victory screen', async ({ page }) => {
+test('clearing a wave summons the next one instead of ending the run', async ({ page }) => {
   await page.goto('/?debug=1')
   await page.click('#start-btn')
   await page.check('#dbg-fast')
   await page.check('#dbg-nollm')
-  for (let i = 0; i < 10; i++) {
-    await page.click('#dbg-buttons >> text=kill monsters')
-    await page.waitForTimeout(900)
-    if (await page.locator('#end-overlay:not(.hidden)').count()) break
-  }
-  await expect(page.locator('#end-title')).toHaveText('THE SHRINE STANDS')
+  await page.locator('#horde-list .horde-row').first().waitFor()
+
+  // The old game ended here. Wiping the board must now advance the counter and
+  // deal a fresh horde, with the overlay staying down.
+  await page.click('#dbg-buttons >> text=kill monsters')
+  await expect(page.locator('#phase-chip')).toHaveText('YOUR COMMAND', { timeout: 40000 })
+  await expect(page.locator('#wave-num')).toHaveText('2')
+  await expect(page.locator('#horde-list .horde-row').first()).toBeVisible()
+  await expect(page.locator('#end-overlay')).toHaveClass(/hidden/)
+})
+
+test('the death screen reports how far the run got', async ({ page }) => {
+  await page.goto('/?debug=1')
+  await page.click('#start-btn')
+  await page.check('#dbg-fast')
+  await page.check('#dbg-nollm')
+  await page.locator('#horde-list .horde-row').first().waitFor()
+
+  await page.click('#dbg-buttons >> text=slay heroes')
+  await page.locator('#end-overlay:not(.hidden)').waitFor({ timeout: 40000 })
+
+  await expect(page.locator('#end-title')).toHaveText('DARKNESS FALLS')
+  await expect(page.locator('#end-wave')).toHaveText(/WAVE \d+/)
+  await expect(page.locator('#end-best')).not.toBeEmpty()
   await expect(page.locator('#end-stats')).toContainText('MVP')
+  await expect(page.locator('#end-stats')).toContainText('Suffered')
 })

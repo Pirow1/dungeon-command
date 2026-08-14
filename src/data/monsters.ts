@@ -50,19 +50,33 @@ export const MONSTER_DEFS: Record<string, MonsterDef> = {
 }
 
 let monsterCounter = 0
-export function makeMonster(kind: string, pos: { x: number; y: number }): Unit {
+
+// `scaling` comes from the wave number (see scalingForWave). It is applied at
+// build time and never written back to MONSTER_DEFS — the defs are the stock
+// stat line for every run, and a mutated def would leak across games.
+export function makeMonster(
+  kind: string,
+  pos: { x: number; y: number },
+  scaling?: { hpMult: number; dmgBonus: number },
+): Unit {
   const def = MONSTER_DEFS[kind]
   monsterCounter++
+  const hp = Math.round(def.hp * (scaling?.hpMult ?? 1))
+  const bonus = scaling?.dmgBonus ?? 0
   return {
     id: `${kind}${monsterCounter}`,
     name: def.name,
     cls: def.cls,
     side: 'monsters',
-    hp: def.hp,
-    maxHp: def.hp,
+    hp,
+    maxHp: hp,
     pos: { ...pos },
     move: def.move,
-    attack: { ...def.attack },
+    attack: {
+      ...def.attack,
+      dmgMin: def.attack.dmgMin + bonus,
+      dmgMax: def.attack.dmgMax + bonus,
+    },
     defending: false,
     alive: true,
   }

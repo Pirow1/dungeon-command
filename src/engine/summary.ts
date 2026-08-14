@@ -87,7 +87,7 @@ function nearestLandmark(map: MapDef, pos: Vec): string {
 
 export interface CompactState {
   turn: number
-  wave: string
+  wave: number
   shrineHp: string
   landmarks: string[]
   chests: string[]
@@ -99,7 +99,7 @@ export function summarize(map: MapDef, state: GameState): CompactState {
   const shrine = unitById(state, SHRINE_ID)!
   return {
     turn: state.turn,
-    wave: `${state.wave} of ${state.totalWaves}`,
+    wave: state.wave,
     shrineHp: `${shrine.hp}/${shrine.maxHp}`,
     landmarks: map.landmarks.map((l) => l.key),
     // "chest2 (loot) - 4 tiles from west_door". The id is what a hero is sent

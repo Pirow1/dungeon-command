@@ -44,6 +44,15 @@ export function initDebug(controller: Controller, scene: GameScene): void {
     s.hp = Math.max(0, s.hp - 8)
     controller.runActions([])
   })
+  // The only way to reach the end screen on demand: waves never run out, and
+  // 'hurt shrine' only drains hp — checkEnd tests `alive`, which it never clears.
+  mk('slay heroes', () => {
+    for (const u of livingHeroes(controller.state)) {
+      u.hp = 0
+      u.alive = false
+    }
+    controller.runActions([])
+  })
 
   document.getElementById('dbg-inject')!.addEventListener('click', () => {
     const raw = (document.getElementById('dbg-json') as HTMLTextAreaElement).value

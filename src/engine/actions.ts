@@ -50,6 +50,7 @@ function applyDamage(state: GameState, attacker: Unit, target: Unit, events: Gam
   )
   target.hp = Math.max(0, target.hp - dmg)
   state.stats.damageDealt[attacker.id] = (state.stats.damageDealt[attacker.id] ?? 0) + dmg
+  state.stats.damageTaken[target.id] = (state.stats.damageTaken[target.id] ?? 0) + dmg
   if (target.id === SHRINE_ID) {
     events.push({ type: 'shrine_damaged', amount: dmg, hpAfter: target.hp })
   } else {

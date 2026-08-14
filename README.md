@@ -10,6 +10,19 @@ Hold **Space**, say that, and watch four AI-driven heroes interpret it, argue wi
 
 ---
 
+## The run
+
+The horde never runs out. Waves are generated on a threat budget that grows every
+wave, monster archetypes unlock as you go (archers at 2, orcs at 3, demons at 5),
+and every fifth wave is led by a demon. From wave 6 the monsters themselves start
+scaling. Entry doors are drawn per monster, so no two runs press you the same way.
+
+There is nothing to win — the score is how far you got. Clear a boss wave and one
+fallen hero comes back at half strength; loot chests turn from small permanent stat
+gains into serious healing as the run deepens, which is what keeps a deep run
+survivable. When the shrine finally falls, the death screen reports the wave you
+reached against your personal best.
+
 ## Three AI minds, one strict rules engine
 
 The interesting part isn't that an LLM is in the loop. It's that the LLM is **fenced**.

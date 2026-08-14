@@ -49,6 +49,13 @@ export interface Unit {
 
 export type ChestStat = 'attack' | 'defence' | 'move'
 
+// What a chest gives up. Stat rewards are permanent; heals are immediate and
+// clamped to maxHp. The mix shifts toward healing as the waves climb — see
+// rollChestReward in chests.ts.
+export type ChestReward =
+  | { kind: 'stat'; stat: ChestStat; amount: 1 | 2 }
+  | { kind: 'heal'; amount: number }
+
 export interface StatBoosts {
   attack: number
   defence: number
@@ -95,18 +102,20 @@ export interface MapDef {
   heroStarts: Vec[]
 }
 
-export type Outcome = 'ongoing' | 'victory' | 'defeat'
+// Endless survival: a run only ever ends one way. There is no victory state —
+// the score is how far you got, which is `state.wave`.
+export type Outcome = 'ongoing' | 'defeat'
 
 export interface GameStats {
   damageDealt: Record<string, number>
+  damageTaken: Record<string, number>
   kills: Record<string, number>
   turns: number
 }
 
 export interface GameState {
   turn: number // player turn counter, starts at 1
-  wave: number // last spawned wave (0 = none yet)
-  totalWaves: number
+  wave: number // last spawned wave (0 = none yet); doubles as the run score
   turnsSinceWave: number
   rng: number // mulberry32 state — seeded, advances deterministically
   units: Unit[]
@@ -122,6 +131,9 @@ export type GameEvent =
   | { type: 'damage'; targetId: string; amount: number; hpAfter: number }
   | { type: 'heal'; unitId: string; targetId: string; amount: number; hpAfter: number }
   | { type: 'unit_died'; unitId: string }
+  // Clearing a boss wave calls one hero back. `pos` travels with the event
+  // because the corpse tile may be occupied by then and the engine nudges.
+  | { type: 'unit_revived'; unitId: string; hp: number; pos: Vec }
   | { type: 'defend'; unitId: string }
   | { type: 'chatter'; unitId: string; name: string; text: string; kind: 'party' | 'monster' }
   | { type: 'wave_spawned'; wave: number; unitIds: string[] }
@@ -129,7 +141,7 @@ export type GameEvent =
   | { type: 'chest_spawned'; chestId: string; pos: Vec }
   // `pos` travels with the event: the chest is already off the state by the
   // time the renderer plays this back.
-  | { type: 'chest_opened'; chestId: string; unitId: string; stat: ChestStat; pos: Vec }
+  | { type: 'chest_opened'; chestId: string; unitId: string; reward: ChestReward; pos: Vec }
   | { type: 'game_over'; outcome: Outcome }
 
 export const SHRINE_ID = 'shrine'

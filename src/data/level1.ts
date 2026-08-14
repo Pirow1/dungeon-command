@@ -56,12 +56,22 @@ function parse(): MapDef {
   const west = doorTiles.find((d) => d.x === 0)!
   const east = doorTiles.find((d) => d.x === width - 1)!
 
+  // Doors are where monsters pour in; the halls are the open floor on each side
+  // of the shrine. Without the halls the only way to say "go left" is
+  // "west_door" — which parks a hero in the monster entrance, and leaves plain
+  // directional orders ("left, then down") with nowhere sensible to land.
   const landmarks: Landmark[] = [
     { key: 'shrine', label: 'the shrine', pos: shrine },
     { key: 'north_door', label: 'the north door', pos: { x: north[0].x, y: 1 } },
     { key: 'west_door', label: 'the west door', pos: { x: 1, y: west.y } },
     { key: 'east_door', label: 'the east door', pos: { x: width - 2, y: east.y } },
     { key: 'shrine_room', label: 'the shrine room', pos: { x: shrine.x - 1, y: shrine.y } },
+    // The northern mouth of the shrine chamber: far enough from the door that a
+    // hero sent here is blocking the approach, not standing on the spawn tiles.
+    { key: 'north_hall', label: 'the north hall', pos: { x: shrine.x, y: 3 } },
+    { key: 'south_hall', label: 'the south hall', pos: { x: shrine.x, y: height - 3 } },
+    { key: 'west_hall', label: 'the west hall', pos: { x: 3, y: west.y } },
+    { key: 'east_hall', label: 'the east hall', pos: { x: width - 4, y: east.y } },
   ]
 
   const spawns: Record<string, Vec[]> = {

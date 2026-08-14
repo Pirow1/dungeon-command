@@ -1,5 +1,5 @@
 import Phaser from 'phaser'
-import type { Chest, ChestStat, GameEvent, GameState, Unit, Vec } from '../engine/types'
+import type { Chest, ChestReward, GameEvent, GameState, Unit, Vec } from '../engine/types'
 import { unitById } from '../engine/types'
 import { LEVEL1 } from '../data/level1'
 import { reachable } from '../engine/pathfind'
@@ -30,10 +30,10 @@ export interface BeatSignal {
 
 const px = (t: number) => t * CELL + CELL / 2
 
-const STAT_POP: Record<ChestStat, string> = {
-  attack: '+1 ATK',
-  defence: '+1 DEF',
-  move: '+1 MOV',
+const STAT_POP: Record<string, string> = { attack: 'ATK', defence: 'DEF', move: 'MOV' }
+
+function rewardPop(reward: ChestReward): string {
+  return reward.kind === 'heal' ? `+${reward.amount} HP` : `+${reward.amount} ${STAT_POP[reward.stat]}`
 }
 
 export class GameScene extends Phaser.Scene {
@@ -42,11 +42,14 @@ export class GameScene extends Phaser.Scene {
   private rangeOverlay!: Phaser.GameObjects.Graphics
   private speed = 1
   private getState: (() => GameState) | null = null
+  // unitId -> where this turn's order sends it ("west hall"), for the readout.
+  private headings = new Map<string, string>()
   onChatter: ((ev: Extract<GameEvent, { type: 'chatter' }>) => void) | null = null
   onWave: ((wave: number) => void) | null = null
   onAction: ((unitId: string, text: string) => void) | null = null
   onBeat: ((beat: BeatSignal) => void) | null = null
-  onChest: ((unitId: string, stat: ChestStat) => void) | null = null
+  onChest: ((unitId: string, reward: ChestReward) => void) | null = null
+  onRevive: ((unitId: string, hp: number) => void) | null = null
 
   constructor() {
     super('game')
@@ -58,6 +61,12 @@ export class GameScene extends Phaser.Scene {
 
   bindState(getter: () => GameState): void {
     this.getState = getter
+  }
+
+  // Set from the turn's orders before playback, so a move can announce where it
+  // is going rather than just "Advanced".
+  setHeadings(headings: Map<string, string>): void {
+    this.headings = headings
   }
 
   create(): void {
@@ -325,9 +334,16 @@ export class GameScene extends Phaser.Scene {
         case 'chest_opened':
           put(ev.unitId, 2, 'Looted a chest')
           break
-        case 'unit_moved':
-          put(ev.unitId, 1, 'Advanced')
+        case 'unit_revived':
+          put(ev.unitId, 3, 'Risen')
           break
+        case 'unit_moved': {
+          // A hero rounding a wall can spend its first turn walking away from
+          // the destination; naming the destination is what makes that legible.
+          const heading = this.headings.get(ev.unitId)
+          put(ev.unitId, 1, heading ? `→ ${heading}` : 'Advanced')
+          break
+        }
       }
     }
     return desc
@@ -370,13 +386,20 @@ export class GameScene extends Phaser.Scene {
           const x = view?.x ?? px(ev.pos.x)
           const y = view?.y ?? px(ev.pos.y)
           this.impact(x, y, 0xffd67a)
-          this.floatText(x, y - 26, STAT_POP[ev.stat], '#ffd67a', 20)
+          this.floatText(x, y - 26, rewardPop(ev.reward), '#ffd67a', 20)
           if (view) {
             await this.tweenP({ targets: view, alpha: 0, scale: 0.5, duration: 260, ease: 'quad.in' })
             view.destroy()
             this.chestViews.delete(ev.chestId)
           }
-          this.onChest?.(ev.unitId, ev.stat)
+          // A heal chest changes the hero's bar, and the bar is elsewhere on the
+          // board — repaint before the moment passes.
+          if (ev.reward.kind === 'heal') {
+            const hero = this.views.get(ev.unitId)
+            const u = unitById(state, ev.unitId)
+            if (hero && u) this.drawHpBar(hero, u)
+          }
+          this.onChest?.(ev.unitId, ev.reward)
           await this.wait(240)
           break
         }
@@ -512,6 +535,22 @@ export class GameScene extends Phaser.Scene {
             view.root.destroy()
             this.views.delete(ev.unitId)
           }
+          break
+        }
+        case 'unit_revived': {
+          // The death case destroyed this view and dropped it from the map, so
+          // syncUnits rebuilds it from scratch with the usual pop-in.
+          this.syncUnits(state)
+          announce(ev.unitId)
+          sfx('heal')
+          const view = this.views.get(ev.unitId)
+          if (view) {
+            this.floatText(view.root.x, view.root.y - 44, 'RISEN', '#6fcf6f', 22)
+            const glow = this.add.circle(view.root.x, view.root.y, 26, 0x6fcf6f, 0.4).setDepth(5).setBlendMode(Phaser.BlendModes.ADD)
+            this.tweens.add({ targets: glow, alpha: 0, scale: 1.8, duration: 620 * this.speed, onComplete: () => glow.destroy() })
+          }
+          this.onRevive?.(ev.unitId, ev.hp)
+          await this.wait(560)
           break
         }
         case 'game_over':

@@ -1,6 +1,8 @@
 // Balance harness: plays full games against the real LLM endpoints using a
-// scripted "competent commander" order list, and reports win rate + turn counts.
-// Usage: npm run playtest [-- games]
+// scripted "competent commander" order list. Endless mode has no win rate, so
+// what it reports is how deep the runs got — median and max wave are the numbers
+// the difficulty curve is tuned against.
+// Usage: npm run playtest [-- games]   (NO_LLM=1 for the fast heuristic loop)
 import { LEVEL1 } from '../src/data/level1'
 import { initGame, resolveMonsterTurn, resolvePartyTurn } from '../src/engine/turn'
 import { summarize } from '../src/engine/summary'
@@ -44,7 +46,8 @@ async function playOne(seed: number) {
   const { state } = initGame(LEVEL1, seed)
   let guard = 0
   let llmFailures = 0
-  while (state.outcome === 'ongoing' && guard++ < 60) {
+  // Endless runs are long: the cap is a runaway backstop, not a turn limit.
+  while (state.outcome === 'ongoing' && guard++ < 250) {
     let partyActions: Action[]
     if (USE_LLM) {
       const res = await post('/api/orders', { order: commanderOrder(state), state: summarize(LEVEL1, state) })
@@ -90,11 +93,19 @@ async function main() {
     const r = await playOne(100 + i)
     results.push(r)
     console.log(
-      `game ${i + 1}: ${r.outcome.toUpperCase()} after ${r.turns} turns (wave ${r.wave}) — shrine ${r.shrineHp}/20, heroes ${r.heroesAlive}/4, llm failures ${r.llmFailures}`,
+      `game ${i + 1}: reached WAVE ${r.wave} in ${r.turns} turns (${r.outcome}) — shrine ${r.shrineHp}/20, heroes ${r.heroesAlive}/4, llm failures ${r.llmFailures}`,
     )
   }
-  const wins = results.filter((r) => r.outcome === 'victory').length
-  console.log(`\nwin rate: ${wins}/${games}  ·  avg turns ${(results.reduce((a, r) => a + r.turns, 0) / games).toFixed(1)}`)
+  const waves = results.map((r) => r.wave).sort((a, b) => a - b)
+  const median = waves[Math.floor((waves.length - 1) / 2)]
+  const mean = waves.reduce((a, w) => a + w, 0) / games
+  const stalled = results.filter((r) => r.outcome === 'ongoing').length
+  console.log(
+    `\nwave reached — median ${median}  mean ${mean.toFixed(1)}  min ${waves[0]}  max ${waves[waves.length - 1]}` +
+      `  ·  avg turns ${(results.reduce((a, r) => a + r.turns, 0) / games).toFixed(1)}`,
+  )
+  // A run that hits the guard never resolved: the curve is too flat to kill.
+  if (stalled) console.log(`WARNING: ${stalled}/${games} hit the turn guard without dying`)
 }
 
 main().catch((e) => {

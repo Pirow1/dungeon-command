@@ -3,10 +3,20 @@ import { LEVEL1 } from '../../src/data/level1'
 import { initGame, resolveMonsterTurn, resolvePartyTurn } from '../../src/engine/turn'
 import { reachable, pathTo, distanceField, bestTileToward } from '../../src/engine/pathfind'
 import { hasLOS } from '../../src/engine/los'
+import { isStandable } from '../../src/engine/map'
 import { summarize } from '../../src/engine/summary'
 import { fallbackMonsterActions, fallbackPartyActions } from '../../src/ai/fallback'
 import { chebyshev, keyOf, livingHeroes, livingMonsters, unitById } from '../../src/engine/types'
 import type { Action, GameState, Vec } from '../../src/engine/types'
+import {
+  MAX_ALIVE,
+  MAX_TURNS_PER_WAVE,
+  MONSTER_UNLOCK,
+  scalingForWave,
+  shouldSpawnWave,
+} from '../../src/engine/waves'
+import { MONSTER_DEFS, makeMonster } from '../../src/data/monsters'
+import { rollChestReward } from '../../src/engine/chests'
 
 describe('map', () => {
   it('parses level1 with landmarks and hero starts', () => {
@@ -17,6 +27,40 @@ describe('map', () => {
     for (const start of LEVEL1.heroStarts) {
       expect(LEVEL1.tiles[start.y][start.x]).toBe('floor')
     }
+  })
+
+  it('gives every direction a hall to aim at, and every landmark a standable tile', () => {
+    const keys = LEVEL1.landmarks.map((l) => l.key)
+    for (const hall of ['north_hall', 'south_hall', 'west_hall', 'east_hall']) {
+      expect(keys).toContain(hall)
+    }
+    // A landmark on a wall would silently degrade every order that names it:
+    // moveToward falls back to "closest reachable tile" and the hero drifts.
+    // (The shrine landmark is the one tile heroes stand BESIDE, not on.)
+    for (const l of LEVEL1.landmarks) {
+      expect(LEVEL1.tiles[l.pos.y][l.pos.x]).not.toBe('wall')
+      if (l.key !== 'shrine') expect(isStandable(LEVEL1, l.pos)).toBe(true)
+    }
+    // The halls sit off the doors, so "hold the west" is not "stand in the
+    // monster entrance".
+    const doors = LEVEL1.landmarks.filter((l) => l.key.endsWith('_door'))
+    for (const hall of LEVEL1.landmarks.filter((l) => l.key.endsWith('_hall'))) {
+      for (const d of doors) expect(chebyshev(hall.pos, d.pos)).toBeGreaterThan(1)
+    }
+  })
+
+  it('routes a hero out of the walled shrine chamber to a hall it cannot reach directly', () => {
+    const { state } = initGame(LEVEL1, 7)
+    const hero = unitById(state, 'brannor')!
+    const west = LEVEL1.landmarks.find((l) => l.key === 'west_hall')!
+    const startDist = chebyshev(hero.pos, west.pos)
+    // Several turns: the chamber only opens north and south, so the first leg
+    // legitimately walks AWAY from a westward destination.
+    for (let i = 0; i < 6; i++) {
+      resolvePartyTurn(LEVEL1, state, [{ unitId: 'brannor', type: 'move', toLandmark: 'west_hall' }])
+    }
+    expect(chebyshev(hero.pos, west.pos)).toBeLessThan(startDist)
+    expect(keyOf(hero.pos)).toBe(keyOf(west.pos))
   })
 })
 
@@ -114,15 +158,17 @@ describe('full game simulation', () => {
     for (let seed = 1; seed <= 50; seed++) {
       const { state } = initGame(LEVEL1, seed)
       let guard = 0
-      while (state.outcome === 'ongoing' && guard < 200) {
+      while (state.outcome === 'ongoing' && guard < 300) {
         resolvePartyTurn(LEVEL1, state, fallbackPartyActions(state, false))
         if (state.outcome === 'ongoing') {
           resolveMonsterTurn(LEVEL1, state, fallbackMonsterActions(state))
         }
         guard++
       }
-      expect(guard).toBeLessThan(200)
-      expect(['victory', 'defeat']).toContain(state.outcome)
+      expect(guard).toBeLessThan(300)
+      // There is nothing to win: the scaling curve outruns every source of
+      // healing, so every run must end in defeat rather than stall forever.
+      expect(state.outcome).toBe('defeat')
     }
   })
 
@@ -130,7 +176,7 @@ describe('full game simulation', () => {
     const run = (seed: number) => {
       const { state } = initGame(LEVEL1, seed)
       let guard = 0
-      while (state.outcome === 'ongoing' && guard++ < 200) {
+      while (state.outcome === 'ongoing' && guard++ < 300) {
         resolvePartyTurn(LEVEL1, state, fallbackPartyActions(state, false))
         if (state.outcome === 'ongoing') {
           resolveMonsterTurn(LEVEL1, state, fallbackMonsterActions(state))
@@ -167,11 +213,136 @@ describe('summary', () => {
   })
 })
 
-describe('waves', () => {
-  it('spawns wave 1 at init and escalates to victory when cleared', () => {
+describe('endless waves', () => {
+  // Drives the generator forward without playing: clears the board and runs a
+  // no-op party turn, which is what triggers the next wave.
+  const advanceTo = (state: GameState, wave: number) => {
+    let guard = 0
+    while (state.wave < wave && guard++ < 200) {
+      for (const m of livingMonsters(state)) {
+        m.hp = 0
+        m.alive = false
+      }
+      resolvePartyTurn(LEVEL1, state, [])
+    }
+    return state
+  }
+
+  it('spawns wave 1 at init', () => {
     const { state } = initGame(LEVEL1)
     expect(state.wave).toBe(1)
     expect(livingMonsters(state).length).toBe(3)
+  })
+
+  it('never spawns a kind before its unlock wave', () => {
+    for (let seed = 1; seed <= 10; seed++) {
+      const { state } = initGame(LEVEL1, seed)
+      for (let wave = 1; wave <= 12; wave++) {
+        advanceTo(state, wave)
+        for (const m of livingMonsters(state)) {
+          expect(MONSTER_UNLOCK[m.cls]).toBeLessThanOrEqual(wave)
+        }
+      }
+    }
+  })
+
+  it('leads every fifth wave with a demon', () => {
+    for (let seed = 1; seed <= 5; seed++) {
+      const { state } = initGame(LEVEL1, seed)
+      for (const wave of [5, 10, 15]) {
+        advanceTo(state, wave)
+        expect(livingMonsters(state).some((m) => m.cls === 'demon')).toBe(true)
+      }
+    }
+  })
+
+  it('keeps the board under the horde cap the monster LLM can answer for', () => {
+    for (let seed = 1; seed <= 10; seed++) {
+      const { state } = initGame(LEVEL1, seed)
+      for (let wave = 1; wave <= 20; wave++) {
+        advanceTo(state, wave)
+        expect(livingMonsters(state).length).toBeLessThanOrEqual(MAX_ALIVE)
+      }
+    }
+  })
+
+  it('holds a saturated board rather than stacking another wave on it', () => {
+    const { state } = initGame(LEVEL1, 4)
+    advanceTo(state, 3)
+    // Board full and the stall timer expired: the wave must wait.
+    while (livingMonsters(state).length < MAX_ALIVE) {
+      state.units.push(makeMonster('goblin', { x: 1, y: 1 }))
+    }
+    state.turnsSinceWave = MAX_TURNS_PER_WAVE + 5
+    expect(shouldSpawnWave(state)).toBe(false)
+  })
+
+  it('leaves monsters stock until the first demon, then thickens them', () => {
+    expect(scalingForWave(5)).toEqual({ hpMult: 1, dmgBonus: 0 })
+    const stock = makeMonster('goblin', { x: 1, y: 1 })
+    const late = makeMonster('goblin', { x: 1, y: 1 }, scalingForWave(15))
+    expect(late.maxHp).toBeGreaterThan(stock.maxHp)
+    expect(late.hp).toBe(late.maxHp)
+    expect(late.attack.dmgMin).toBeGreaterThan(stock.attack.dmgMin)
+    // The stat block itself must never be written back to.
+    expect(MONSTER_DEFS.goblin.hp).toBe(stock.maxHp)
+  })
+
+  it('calls one fallen hero back when a boss wave is cleared', () => {
+    const { state } = initGame(LEVEL1, 6)
+    advanceTo(state, 5)
+    const pip = unitById(state, 'pip')!
+    pip.hp = 0
+    pip.alive = false
+
+    for (const m of livingMonsters(state)) {
+      m.hp = 0
+      m.alive = false
+    }
+    const events = resolvePartyTurn(LEVEL1, state, [])
+
+    const revived = events.filter((e) => e.type === 'unit_revived')
+    expect(revived.length).toBe(1)
+    expect(revived[0]).toMatchObject({ unitId: 'pip' })
+    expect(unitById(state, 'pip')!.alive).toBe(true)
+    // Half strength, plus the breather heal every survivor gets.
+    expect(unitById(state, 'pip')!.hp).toBeGreaterThanOrEqual(Math.floor(pip.maxHp / 2))
+    expect(unitById(state, 'pip')!.hp).toBeLessThan(pip.maxHp)
+  })
+
+  it('does not revive on an ordinary wave', () => {
+    const { state } = initGame(LEVEL1, 6)
+    advanceTo(state, 3)
+    const pip = unitById(state, 'pip')!
+    pip.hp = 0
+    pip.alive = false
+    for (const m of livingMonsters(state)) {
+      m.hp = 0
+      m.alive = false
+    }
+    const events = resolvePartyTurn(LEVEL1, state, [])
+    expect(events.some((e) => e.type === 'unit_revived')).toBe(false)
+    expect(unitById(state, 'pip')!.alive).toBe(false)
+  })
+})
+
+describe('stats', () => {
+  it('records damage taken as well as dealt', () => {
+    const { state } = initGame(LEVEL1, 21)
+    const target = unitById(state, 'brannor')!
+    const goblin = livingMonsters(state)[0]
+    goblin.pos = { x: target.pos.x + 1, y: target.pos.y }
+
+    // The whole horde acts on its turn, so tally the blows that actually landed
+    // on Brannor rather than assuming only the named goblin reached him.
+    const events = resolveMonsterTurn(LEVEL1, state, [
+      { unitId: goblin.id, type: 'attack', targetId: 'brannor' },
+    ])
+    const landed = events
+      .filter((e) => e.type === 'damage' && e.targetId === 'brannor')
+      .reduce((a, e) => a + (e.type === 'damage' ? e.amount : 0), 0)
+    expect(landed).toBeGreaterThan(0)
+    expect(state.stats.damageTaken['brannor']).toBe(landed)
   })
 })
 
@@ -227,6 +398,7 @@ describe('loot chests', () => {
     const opened = events.filter((e) => e.type === 'chest_opened')
     expect(opened.length).toBe(1)
     expect(opened[0]).toMatchObject({ unitId: 'brannor', chestId: chest.id })
+    expect(opened[0].type === 'chest_opened' && opened[0].reward).toMatchObject({ kind: 'stat', amount: 1 })
     expect(state.chests.find((c) => c.id === chest.id)).toBeUndefined()
 
     const after = statsOf(state)
@@ -289,6 +461,41 @@ describe('loot chests', () => {
     const events = resolveMonsterTurn(LEVEL1, state, [{ unitId: goblin.id, type: 'move', to: chest.pos }])
     expect(events.some((e) => e.type === 'chest_opened')).toBe(false)
     expect(state.chests.length).toBe(1)
+  })
+
+  it('pays out richer the deeper the run goes', () => {
+    const { state } = initGame(LEVEL1, 13)
+    const hero = unitById(state, 'brannor')!
+    // Wounded, so heal rolls are not converted away by the low-value guard.
+    hero.hp = 4
+
+    const sample = (wave: number) => {
+      state.wave = wave
+      const kinds = new Set<string>()
+      for (let i = 0; i < 60; i++) {
+        const r = rollChestReward(state, hero)
+        kinds.add(r.kind === 'heal' ? 'heal' : `stat${r.amount}`)
+      }
+      return kinds
+    }
+
+    // Early: nothing but the original +1. Later: bigger stats and healing.
+    expect([...sample(2)]).toEqual(['stat1'])
+    expect(sample(6).has('heal')).toBe(true)
+    expect(sample(6).has('stat2')).toBe(false)
+    const deep = sample(10)
+    expect(deep.has('stat2')).toBe(true)
+    expect(deep.has('stat1')).toBe(false)
+  })
+
+  it('never hands a heal to a hero with nothing to heal', () => {
+    const { state } = initGame(LEVEL1, 17)
+    const hero = unitById(state, 'brannor')!
+    state.wave = 14 // deepest tier: half the pool is a full heal
+    hero.hp = hero.maxHp
+    for (let i = 0; i < 40; i++) {
+      expect(rollChestReward(state, hero).kind).toBe('stat')
+    }
   })
 
   it('does not carry stat gains into the next game', () => {

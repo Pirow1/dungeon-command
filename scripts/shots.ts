@@ -36,16 +36,22 @@ async function main() {
     await page.screenshot({ path: `${OUT}/5-hover-range.png` })
   }
 
-  // Fast-forward to the end screen with the debug controls.
+  // Push the run deep enough to show a boss wave, then fall on purpose. Clearing
+  // the board no longer ends anything — it just summons the next wave.
   await page.check('#dbg-fast')
-  for (let i = 0; i < 8; i++) {
+  await page.check('#dbg-nollm')
+  for (let i = 0; i < 4; i++) {
     await page.click('#dbg-buttons >> text=kill monsters')
-    await page.waitForTimeout(1200)
-    const done = await page.evaluate(() => !document.getElementById('end-overlay')!.classList.contains('hidden'))
-    if (done) break
+    await page.waitForTimeout(1400)
   }
+  await page.screenshot({ path: `${OUT}/6-deep-wave.png` })
+
+  await page.click('#dbg-buttons >> text=slay heroes')
+  await page.waitForFunction(() => !document.getElementById('end-overlay')!.classList.contains('hidden'), {
+    timeout: 40000,
+  })
   await page.waitForTimeout(800)
-  await page.screenshot({ path: `${OUT}/6-victory.png` })
+  await page.screenshot({ path: `${OUT}/7-death.png` })
 
   await browser.close()
   console.log(`screenshots written to ${OUT}/`)

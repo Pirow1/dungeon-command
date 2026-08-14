@@ -2,12 +2,11 @@ import type { Action, GameEvent, GameState, MapDef, Unit } from './types'
 import { SHRINE_ID, livingHeroes, livingMonsters, unitById } from './types'
 import { resolveUnitAction } from './actions'
 import { checkChestPickup } from './chests'
-import { shouldSpawnWave, spawnWave, WAVES } from './waves'
+import { shouldSpawnWave, spawnWave } from './waves'
 import { HEROES } from '../data/heroes'
 import { resetMonsterCounter } from '../data/monsters'
 
 export const SHRINE_HP = 20
-export const TOTAL_WAVES = WAVES.length
 
 export function initGame(map: MapDef, seed = 1337): { state: GameState; events: GameEvent[] } {
   resetMonsterCounter()
@@ -40,30 +39,26 @@ export function initGame(map: MapDef, seed = 1337): { state: GameState; events: 
   const state: GameState = {
     turn: 1,
     wave: 0,
-    totalWaves: TOTAL_WAVES,
     turnsSinceWave: 0,
     rng: seed | 0,
     units: [shrine, ...heroes],
     chests: [],
     outcome: 'ongoing',
-    stats: { damageDealt: {}, kills: {}, turns: 0 },
+    stats: { damageDealt: {}, damageTaken: {}, kills: {}, turns: 0 },
   }
   const events: GameEvent[] = []
   spawnWave(map, state, events) // wave 1 is on the board before the first order
   return { state, events }
 }
 
+// The horde never runs out, so there is nothing to win — a run ends when the
+// shrine falls or the last hero does, and `state.wave` is the score.
 export function checkEnd(state: GameState, events: GameEvent[]): void {
   if (state.outcome !== 'ongoing') return
   const shrine = unitById(state, SHRINE_ID)
   if (!shrine?.alive || livingHeroes(state).length === 0) {
     state.outcome = 'defeat'
     events.push({ type: 'game_over', outcome: 'defeat' })
-    return
-  }
-  if (state.wave >= state.totalWaves && livingMonsters(state).length === 0) {
-    state.outcome = 'victory'
-    events.push({ type: 'game_over', outcome: 'victory' })
   }
 }
 

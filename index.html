@@ -215,6 +215,10 @@
     .ghost-btn { margin-top: 14px; background: none; border: 1px solid var(--gold-dim); color: var(--gold); font-family: Cinzel, serif; font-size: 14px; letter-spacing: 1px; padding: 8px 22px; border-radius: 5px; cursor: pointer; }
     .ghost-btn:hover { border-color: var(--gold); color: #fff0cf; }
     #end-overlay h1.defeat { color: var(--danger); text-shadow: 0 0 40px rgba(224,85,69,.4), 0 3px 0 #000; }
+    #end-held { margin-top: 14px; font-size: 13px; letter-spacing: .28em; color: var(--ink); opacity: .75; }
+    #end-wave { font-family: 'Cinzel', Georgia, serif; font-size: 64px; line-height: 1.05; color: var(--gold); text-shadow: 0 0 44px rgba(214,175,106,.35), 0 3px 0 #000; margin: 2px 0 6px; }
+    #end-best { font-size: 14px; letter-spacing: .12em; color: var(--ink); min-height: 20px; }
+    #end-best.record { color: var(--gold); font-weight: 700; text-shadow: 0 0 24px rgba(214,175,106,.5); }
     #end-stats { margin: 10px 0 24px; font-size: 17px; color: var(--ink); line-height: 1.7; }
     #end-stats b { color: var(--parchment); }
 
@@ -251,7 +255,7 @@
       </div>
       <div id="sidebar">
         <h1>DUNGEON COMMAND</h1>
-        <div id="wave-line">Wave <b id="wave-num">1</b> of <b id="wave-total">5</b> &nbsp;·&nbsp; Turn <b id="turn-num">1</b></div>
+        <div id="wave-line">Wave <b id="wave-num">1</b> &nbsp;·&nbsp; Turn <b id="turn-num">1</b></div>
         <div class="shrine-box" id="shrine-box">
           <div class="row"><span>The Shrine</span><span id="shrine-hp">20/20</span></div>
           <div class="bar shrine"><i id="shrine-bar" style="width:100%"></i></div>
@@ -262,7 +266,7 @@
           <div id="horde-list" class="horde-list"><span class="quiet">The halls are still.</span></div>
         </div>
         <div id="objective">
-          Defend the Shrine of Emberdeep through five waves.<br/>Speak, Archmagus — the party listens.
+          Hold the Shrine of Emberdeep as long as you can. Every wave hits harder.<br/>Speak, Archmagus — the party listens.
           <div id="sound-row"><label><input type="checkbox" id="sound-toggle" checked /> Sound</label></div>
         </div>
       </div>
@@ -289,7 +293,10 @@
   </div>
 
   <div id="end-overlay" class="overlay hidden">
-    <h1 id="end-title">VICTORY</h1>
+    <h1 id="end-title" class="defeat">DARKNESS FALLS</h1>
+    <div id="end-held">YOU HELD UNTIL</div>
+    <div id="end-wave">WAVE 1</div>
+    <div id="end-best"></div>
     <div id="end-stats"></div>
     <button id="again-btn" class="big-btn">Command Again</button>
     <button id="chronicle-btn" class="ghost-btn">Read the Chronicle</button>

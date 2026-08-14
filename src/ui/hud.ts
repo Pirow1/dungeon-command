@@ -48,7 +48,6 @@ export function noteAction(unitId: string, text: string): void {
 
 export function updateHud(state: GameState): void {
   document.getElementById('wave-num')!.textContent = String(state.wave)
-  document.getElementById('wave-total')!.textContent = String(state.totalWaves)
   document.getElementById('turn-num')!.textContent = String(state.turn)
   const shrine = unitById(state, SHRINE_ID)!
   document.getElementById('shrine-hp')!.textContent = `${shrine.hp}/${shrine.maxHp}`
@@ -213,13 +212,49 @@ export function showBanner(text: string): void {
   b.classList.add('show')
 }
 
+const BEST_KEY = 'dc.bestWave'
+
+// Private browsing and blocked storage both throw on access, and a dead run is
+// the worst possible moment to take down the screen that reports it.
+function readBest(): number {
+  try {
+    return Number(localStorage.getItem(BEST_KEY) ?? 0) || 0
+  } catch {
+    return 0
+  }
+}
+
+function writeBest(wave: number): void {
+  try {
+    localStorage.setItem(BEST_KEY, String(wave))
+  } catch {
+    /* no persistence available — the run still reports its own number */
+  }
+}
+
 export function showEnd(state: GameState): void {
   const overlay = document.getElementById('end-overlay')!
   const title = document.getElementById('end-title')!
+  const waveEl = document.getElementById('end-wave')!
+  const bestEl = document.getElementById('end-best')!
   const stats = document.getElementById('end-stats')!
-  const victory = state.outcome === 'victory'
-  title.textContent = victory ? 'THE SHRINE STANDS' : 'DARKNESS FALLS'
-  title.className = victory ? '' : 'defeat'
+
+  title.textContent = 'DARKNESS FALLS'
+  title.className = 'defeat'
+  waveEl.textContent = `WAVE ${state.wave}`
+
+  // The run's headline number, against the only opponent that matters here.
+  const best = readBest()
+  if (state.wave > best) {
+    writeBest(state.wave)
+    bestEl.textContent = best > 0 ? `NEW RECORD — beat your ${best}` : 'NEW RECORD'
+    bestEl.className = 'record'
+  } else {
+    bestEl.textContent = `Best: Wave ${best}`
+    bestEl.className = ''
+  }
+
+  const isHero = (id: string) => HEROES.some((h) => h.id === id)
   let mvp = ''
   let mvpDmg = -1
   for (const h of HEROES) {
@@ -229,9 +264,18 @@ export function showEnd(state: GameState): void {
       mvp = h.name
     }
   }
-  const kills = Object.entries(state.stats.kills)
-    .filter(([id]) => HEROES.some((h) => h.id === id))
-    .reduce((a, [, k]) => a + k, 0)
-  stats.innerHTML = `Held for <b>${state.turn}</b> turns · <b>${kills}</b> monsters slain<br/>MVP: <b>${mvp}</b> (${mvpDmg} damage dealt)`
+  const sum = (rec: Record<string, number>) =>
+    Object.entries(rec)
+      .filter(([id]) => isHero(id))
+      .reduce((a, [, v]) => a + v, 0)
+  const kills = sum(state.stats.kills)
+  // Hero suffering only: the shrine keeps its own bar and its own story.
+  const dealt = sum(state.stats.damageDealt)
+  const taken = sum(state.stats.damageTaken)
+
+  stats.innerHTML =
+    `Held for <b>${state.turn}</b> turns · <b>${kills}</b> monsters slain<br/>` +
+    `Dealt <b>${dealt}</b> damage · Suffered <b>${taken}</b><br/>` +
+    `MVP: <b>${mvp}</b> (${mvpDmg} damage dealt)`
   overlay.classList.remove('hidden')
 }

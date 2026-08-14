@@ -1,4 +1,4 @@
-import type { Action, ChestStat, GameEvent, GameState } from './engine/types'
+import type { Action, ChestReward, ChestStat, GameEvent, GameState } from './engine/types'
 import { livingHeroes, unitById } from './engine/types'
 import { LEVEL1 } from './data/level1'
 import { initGame, resolveMonsterTurn, resolvePartyTurn } from './engine/turn'
@@ -10,13 +10,20 @@ import * as hud from './ui/hud'
 import * as chatter from './ui/chatter'
 import * as history from './ui/history'
 import type { Beat } from './ui/beat'
-import { displayName, resetLabels } from './ui/labels'
+import { destinationLabel, displayName, resetLabels } from './ui/labels'
 import { MONSTER_DEFS } from './data/monsters'
+import { BOSS_EVERY } from './engine/waves'
 
 const STAT_LABEL: Record<ChestStat, string> = {
   attack: 'Attack',
   defence: 'Defence',
   move: 'Movement',
+}
+
+function rewardLabel(reward: ChestReward): string {
+  return reward.kind === 'heal'
+    ? `restored ${reward.amount} HP`
+    : `${STAT_LABEL[reward.stat]} +${reward.amount}`
 }
 
 // Orchestrates the whole turn loop:
@@ -46,21 +53,44 @@ export class Controller {
     // Goblin", "Braced"); the flavour quote lives in the chatter log.
     scene.onAction = (unitId, text) => hud.noteAction(unitId, text)
     scene.onBeat = (b) => this.handleBeat(b)
-    scene.onChest = (unitId, stat) => {
+    scene.onChest = (unitId, reward) => {
       const u = unitById(this.state, unitId)
       if (!u) return
-      history.logLine('system', `${displayName(u)} opens a chest — ${STAT_LABEL[stat]} +1.`)
-      hud.noteAction(unitId, `Looted +1 ${STAT_LABEL[stat]}`)
+      const label = rewardLabel(reward)
+      history.logLine('system', `${displayName(u)} opens a chest — ${label}.`)
+      hud.noteAction(unitId, reward.kind === 'heal' ? `Looted ${label}` : `Looted ${label}`)
       hud.flashStat(unitId)
     }
+    scene.onRevive = (unitId) => {
+      const u = unitById(this.state, unitId)
+      if (!u) return
+      history.logLine('system', `${displayName(u)} rises again.`)
+      hud.noteAction(unitId, 'Risen')
+      hud.updateHud(this.state)
+    }
     scene.onWave = (wave) => {
-      hud.showBanner(wave >= this.state.totalWaves ? 'THE FINAL WAVE' : `WAVE ${wave}`)
+      const boss = wave % BOSS_EVERY === 0
+      hud.showBanner(boss ? `WAVE ${wave} — A DEMON RISES` : `WAVE ${wave}`)
       hud.updateHud(this.state)
       history.setChapter(wave, this.state.turn)
-      history.logLine('system', `Wave ${wave} of ${this.state.totalWaves} pours through the doors.`)
-      this.narrate(`Wave ${wave} of ${this.state.totalWaves} pours in.`)
+      history.logLine('system', `Wave ${wave} pours through the doors.`)
+      this.narrate(`Wave ${wave} pours in.`)
     }
     scene.bindState(() => this.state)
+  }
+
+  // Where this turn's orders send each hero. A hero moves a few tiles a turn and
+  // the shrine chamber only opens north and south, so "go west" can legitimately
+  // start by walking north — the readout is what stops that looking like the
+  // order was ignored. Rebuilt every turn, so it never goes stale.
+  private noteHeadings(actions: Action[]): void {
+    const headings = new Map<string, string>()
+    for (const a of actions) {
+      if (!a.toLandmark) continue
+      const label = destinationLabel(LEVEL1, this.state, a.toLandmark)
+      if (label) headings.set(a.unitId, label)
+    }
+    this.scene.setHeadings(headings)
   }
 
   // Why each unit did what it did. Always recorded; the Chronicle only shows
@@ -147,6 +177,7 @@ export class Controller {
 
       // 2. Resolve party turn (includes any new wave spawning at the end).
       this.logReasons(partyActions)
+      this.noteHeadings(partyActions)
       const partyEvents = resolvePartyTurn(LEVEL1, this.state, partyActions)
 
       // 3. Fire the monster brain NOW — it thinks while the heroes animate.
@@ -195,6 +226,7 @@ export class Controller {
       hud.setPhase('heroes')
       history.setChapter(this.state.wave, this.state.turn)
       this.logReasons(partyActions)
+      this.noteHeadings(partyActions)
       const partyEvents = resolvePartyTurn(LEVEL1, this.state, partyActions)
       await this.scene.playEvents(this.state, partyEvents)
       hud.updateHud(this.state)
@@ -212,24 +244,16 @@ export class Controller {
     }
   }
 
+  // Endless mode has one ending, so this only ever writes the obituary.
   private checkGameOver(): boolean {
     if (this.state.outcome === 'ongoing') return false
-    history.logLine(
-      'system',
-      this.state.outcome === 'victory' ? 'The shrine stands. The horde is broken.' : 'Emberdeep falls to the dark.',
+    history.logLine('system', 'Emberdeep falls to the dark.')
+    this.narrate(
+      livingHeroes(this.state).length === 0
+        ? 'The last hero has fallen. The orb goes dark.'
+        : 'The shrine is shattered. Darkness pours from the deep.',
     )
-    if (this.state.outcome === 'victory') {
-      this.scene.celebrateHeroes()
-      this.narrate('The last monster falls. The shrine stands. Victory.')
-      setTimeout(() => hud.showEnd(this.state), 1400)
-    } else {
-      this.narrate(
-        livingHeroes(this.state).length === 0
-          ? 'The last hero has fallen. The orb goes dark.'
-          : 'The shrine is shattered. Darkness pours from the deep.',
-      )
-      setTimeout(() => hud.showEnd(this.state), 1400)
-    }
+    setTimeout(() => hud.showEnd(this.state), 1400)
     return true
   }
 }
